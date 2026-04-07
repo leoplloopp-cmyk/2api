@@ -1,0 +1,11 @@
+{
+  "name": "2api",
+  "version": "1.0.0",
+  "description": "Multi-account AI gateway for Capy with web dashboard",
+  "type": "module",
+  "main": "index.mjs",
+  "scripts": {
+    "start": "node index.mjs"
+  },
+  "license": "MIT"
+}
