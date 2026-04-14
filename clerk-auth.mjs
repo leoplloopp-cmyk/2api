@@ -7,14 +7,14 @@ export class ClerkAuth {
   }
 
   async signIn(email, password) {
-    const url = `${this.clerkDomain}/v1/client/sign_ins?_clerk_js_version=5&__clerk_api_key=${this.pk}`;
+    const url = `${this.clerkDomain}/v1/client/sign_ins?_clerk_js_version=5`;
     const body = new URLSearchParams({ identifier: email, password, strategy: 'password' });
 
     const res = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
-        'Referer': 'https://capy.ai/'
+        'Authorization': `Bearer ${this.pk}`
       },
       body
     });
@@ -86,13 +86,13 @@ export class ClerkAuth {
   }
 
   async getSessionToken(clientId, sessionId) {
-    const url = `${this.clerkDomain}/v1/client/sessions/${sessionId}/tokens?_clerk_js_version=5&__clerk_api_key=${this.pk}`;
+    const url = `${this.clerkDomain}/v1/client/sessions/${sessionId}/tokens?_clerk_js_version=5`;
 
     const res = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
-        'Referer': 'https://capy.ai/',
+        'Authorization': `Bearer ${this.pk}`,
         'Cookie': `__client=${clientId}`
       }
     });
