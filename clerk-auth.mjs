@@ -117,6 +117,16 @@ export class ClerkAuth {
 
     const session = this._extractSession(data);
     session.clientJwt = newClientJwt;
+
+    try {
+      const fresh = await this.getSessionToken(newClientJwt, session.sessionId);
+      session.jwt = fresh.jwt;
+      session.clientJwt = fresh.clientJwt;
+      session.expiresAt = Date.now() + 50000;
+    } catch (e) {
+      // fall back to the JWT from verification
+    }
+
     return session;
   }
 
