@@ -100,7 +100,7 @@ async function handleChatCompletions(req, res) {
 
       const threadData = await capy.createThread(token, account.projectId, prompt, requestedModel);
       const threadId = threadData.id;
-      const jamId = threadData.jamId || threadData.id;
+      const jamId = threadData.jamId || null;
 
       let routeUsed = 'A';
       let content = '';
@@ -109,7 +109,7 @@ async function handleChatCompletions(req, res) {
         const sseMode = STREAM_MODE === 'poll' ? 'poll' : 'auto';
         let sseSuccess = false;
 
-        if (sseMode !== 'poll') {
+        if (sseMode !== 'poll' && jamId) {
           try {
             routeUsed = 'B';
             res.writeHead(200, {
@@ -226,7 +226,7 @@ async function handleAnthropicMessages(req, res) {
       const prompt = buildPrompt(messages, requestedModel);
       const threadData = await capy.createThread(token, account.projectId, prompt, requestedModel);
       const threadId = threadData.id;
-      const jamId = threadData.jamId || threadData.id;
+      const jamId = threadData.jamId || null;
 
       let routeUsed = 'A';
       let content = '';
@@ -235,7 +235,7 @@ async function handleAnthropicMessages(req, res) {
         const sseMode = STREAM_MODE === 'poll' ? 'poll' : 'auto';
         let sseSuccess = false;
 
-        if (sseMode !== 'poll') {
+        if (sseMode !== 'poll' && jamId) {
           try {
             routeUsed = 'B';
             res.writeHead(200, {
