@@ -101,6 +101,77 @@ function randomId() {
   return id;
 }
 
+export function fromAnthropicMessages(body) {
+  const messages = [];
+  if (body.system) {
+    const sys = typeof body.system === 'string' ? body.system : body.system.map(b => b.text).join('\n');
+    messages.push({ role: 'system', content: sys });
+  }
+  for (const msg of (body.messages || [])) {
+    const role = msg.role === 'assistant' ? 'assistant' : 'user';
+    let content;
+    if (typeof msg.content === 'string') {
+      content = msg.content;
+    } else if (Array.isArray(msg.content)) {
+      content = msg.content.filter(b => b.type === 'text').map(b => b.text).join('\n');
+    } else {
+      content = String(msg.content || '');
+    }
+    messages.push({ role, content });
+  }
+  return messages;
+}
+
+export function toAnthropicResponse(content, model) {
+  const id = `msg_${randomId()}`;
+  const inputTokens = 0;
+  const outputTokens = content ? content.length : 0;
+  return {
+    id,
+    type: 'message',
+    role: 'assistant',
+    content: [{ type: 'text', text: content }],
+    model,
+    stop_reason: 'end_turn',
+    stop_sequence: null,
+    usage: { input_tokens: inputTokens, output_tokens: outputTokens }
+  };
+}
+
+export function toAnthropicStreamEvent(type, data, model, id) {
+  if (type === 'message_start') {
+    return {
+      type: 'message_start',
+      message: {
+        id,
+        type: 'message',
+        role: 'assistant',
+        content: [],
+        model,
+        stop_reason: null,
+        stop_sequence: null,
+        usage: { input_tokens: 0, output_tokens: 0 }
+      }
+    };
+  }
+  if (type === 'content_block_start') {
+    return { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } };
+  }
+  if (type === 'content_block_delta') {
+    return { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: data } };
+  }
+  if (type === 'content_block_stop') {
+    return { type: 'content_block_stop', index: 0 };
+  }
+  if (type === 'message_delta') {
+    return { type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: data } };
+  }
+  if (type === 'message_stop') {
+    return { type: 'message_stop' };
+  }
+  return { type };
+}
+
 export function mapModel(requestedModel) {
   if (!requestedModel) return 'auto';
 

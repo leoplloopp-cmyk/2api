@@ -22,30 +22,18 @@ header h1{font-size:20px;font-weight:600;color:#f0f6fc;display:flex;align-items:
 .card{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:14px}
 .card-header{display:flex;align-items:center;gap:6px;margin-bottom:8px}
 .card-name{font-weight:600;color:#f0f6fc;font-size:14px}
-.card-email{color:#8b949e;font-size:12px}
-.card-plan{color:#8b949e;font-size:12px;margin-bottom:6px}
-.progress-bar{height:6px;background:#21262d;border-radius:3px;overflow:hidden;margin:6px 0}
-.progress-fill{height:100%;border-radius:3px;transition:width .3s}
-.pct-green{background:#3fb950}.pct-yellow{background:#d29922}.pct-red{background:#f85149}.pct-gray{background:#484f58}
 .card-stats{display:flex;gap:12px;font-size:12px;color:#8b949e;margin:6px 0}
 .card-actions{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
 .btn{padding:4px 10px;border-radius:6px;border:1px solid #30363d;background:#21262d;color:#c9d1d9;font-size:12px;cursor:pointer;transition:background .15s}
 .btn:hover{background:#30363d}
 .btn.primary{background:#238636;border-color:#238636;color:#fff}.btn.primary:hover{background:#2ea043}
 .btn.danger{border-color:#f85149;color:#f85149}.btn.danger:hover{background:#f8514922}
-.btn.warn{border-color:#d29922;color:#d29922}.btn.warn:hover{background:#d2992222}
 .add-form{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:14px;margin-bottom:16px}
 .form-row{display:flex;gap:8px;flex-wrap:wrap;align-items:end}
 .form-group{display:flex;flex-direction:column;gap:3px;flex:1;min-width:140px}
 .form-group label{font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:.5px}
 .form-group input{background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:6px 10px;color:#c9d1d9;font-size:13px;outline:none}
 .form-group input:focus{border-color:#58a6ff}
-.toggle-row{display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:12px;color:#8b949e}
-.toggle-row input[type=checkbox]{accent-color:#58a6ff}
-.otp-box{margin-top:8px;padding:8px;background:#0d1117;border:1px solid #30363d;border-radius:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
-.otp-box input{background:#161b22;border:1px solid #30363d;border-radius:4px;padding:4px 8px;color:#c9d1d9;font-size:13px;width:120px;text-align:center;letter-spacing:2px;outline:none}
-.otp-box input:focus{border-color:#58a6ff}
-.otp-hint{font-size:11px;color:#d29922;margin-top:4px;width:100%}
 .log-panel{background:#161b22;border:1px solid #21262d;border-radius:8px;max-height:300px;overflow-y:auto;font-family:'SF Mono',SFMono-Regular,Consolas,monospace;font-size:12px}
 .log-entry{padding:4px 12px;border-bottom:1px solid #21262d1a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .log-entry:nth-child(odd){background:#161b22}.log-entry:nth-child(even){background:#0d1117}
@@ -60,8 +48,7 @@ header h1{font-size:20px;font-weight:600;color:#f0f6fc;display:flex;align-items:
 .collapsible-body{display:none}.collapsible-body.open{display:block}
 .mask-toggle{cursor:pointer;color:#58a6ff;font-size:11px;margin-left:6px}
 .empty-state{text-align:center;padding:40px;color:#484f58}
-.status-awaiting{color:#d29922;font-size:12px;font-weight:600}
-@media(max-width:640px){.card-grid{grid-template-columns:1fr}.form-row{flex-direction:column}.header-stats{flex-wrap:wrap}}
+@media(max-width:640px){.card-grid{grid-template-columns:1fr}.form-row{flex-direction:column}}
 </style>
 </head>
 <body>
@@ -78,13 +65,9 @@ header h1{font-size:20px;font-weight:600;color:#f0f6fc;display:flex;align-items:
 <div class="section">
   <div class="section-title">Accounts</div>
   <div class="add-form">
-    <div class="toggle-row">
-      <input type="checkbox" id="tokenMode"> <label for="tokenMode">Token-only mode</label>
-    </div>
     <form id="addForm" class="form-row">
-      <div class="form-group" id="nameGroup"><label>Name</label><input id="fName" placeholder="my-account" required></div>
-      <div class="form-group cred-field" id="emailGroup"><label>Email</label><input id="fEmail" type="email" placeholder="user@example.com"></div>
-      <div class="form-group token-field" id="tokenGroup" style="display:none"><label>Token</label><input id="fToken" placeholder="capy_xxxx"></div>
+      <div class="form-group"><label>Name</label><input id="fName" placeholder="my-account" required></div>
+      <div class="form-group"><label>Token</label><input id="fToken" placeholder="capy_xxxx" required></div>
       <div class="form-group"><label>Project ID</label><input id="fProject" placeholder="249a5fef-..."></div>
       <div class="form-group" style="flex:0"><label>&nbsp;</label><button type="submit" class="btn primary">Add Account</button></div>
     </form>
@@ -127,15 +110,8 @@ function fmtUptime(s) {
 }
 
 function statusIcon(st) {
-  const m = {active:'\\u{1F7E2}',logging_in:'\\u{1F535}',cooling:'\\u{1F534}',no_credits:'\\u{1F534}',auth_failed:'\\u{1F534}',disabled:'\\u26AB',low_credits:'\\u{1F7E1}',initializing:'\\u{1F535}',awaiting_otp:'\\u{1F7E1}'};
+  const m = {active:'\\u{1F7E2}',cooling:'\\u{1F534}',no_credits:'\\u{1F534}',auth_failed:'\\u{1F534}',disabled:'\\u26AB',initializing:'\\u{1F535}'};
   return m[st] || '\\u26AA';
-}
-
-function pctClass(p) {
-  if (p < 0) return 'pct-gray';
-  if (p > 50) return 'pct-green';
-  if (p > 20) return 'pct-yellow';
-  return 'pct-red';
 }
 
 function renderAccounts(accounts) {
@@ -145,31 +121,14 @@ function renderAccounts(accounts) {
     return;
   }
   grid.innerHTML = accounts.map(a => {
-    const pct = a.percentage >= 0 ? a.percentage : 0;
-    const pctLabel = a.percentage >= 0 ? a.percentage + '%' : 'N/A';
-    const st = a.percentage >= 0 && a.percentage < 20 && a.status === 'active' ? 'low_credits' : a.status;
-    let otpHtml = '';
-    if (a.status === 'awaiting_otp') {
-      const n = esc(a.name);
-      otpHtml = \`<div class="otp-box">
-        <input id="otp_\${n}" placeholder="Enter code" maxlength="6" autocomplete="one-time-code">
-        <button class="btn primary" onclick="verifyOtp('\${n}')">Verify</button>
-        <button class="btn warn" onclick="resendOtp('\${n}')">Resend</button>
-        <div class="otp-hint">Check your email for the verification code</div>
-      </div>\`;
-    }
     return \`<div class="card">
-      <div class="card-header">\${statusIcon(st)} <span class="card-name">\${esc(a.name)}</span>\${a.status==='awaiting_otp'?' <span class="status-awaiting">AWAITING CODE</span>':''}</div>
-      <div class="card-email">\${a.isTokenOnly ? 'Token-only' : esc(a.email || '')}</div>
-      <div class="card-plan">Plan: \${esc(a.plan)} &mdash; Credits: \${pctLabel}</div>
-      <div class="progress-bar"><div class="progress-fill \${pctClass(a.percentage)}" style="width:\${Math.max(pct,0)}%"></div></div>
+      <div class="card-header">\${statusIcon(a.status)} <span class="card-name">\${esc(a.name)}</span></div>
       <div class="card-stats">
         <span>Requests: \${a.requestCount}</span>
         <span>Errors: \${a.errorCount}</span>
         <span>Last: \${relTime(a.lastUsed)}</span>
-      </div>\${otpHtml}
+      </div>
       <div class="card-actions">
-        <button class="btn" onclick="relogin('\${esc(a.name)}')">Re-login</button>
         <button class="btn" onclick="\${a.enabled ? "disable" : "enable"}('\${esc(a.name)}')">\${a.enabled ? 'Disable' : 'Enable'}</button>
         <button class="btn danger" onclick="remove('\${esc(a.name)}')">Remove</button>
       </div>
@@ -183,7 +142,7 @@ function renderLogs(logs) {
   panel.innerHTML = logs.map(l => {
     const t = new Date(l.timestamp).toLocaleTimeString();
     const ok = l.success;
-    return \`<div class="log-entry"><span class="log-time">\${t}</span> \${l.method} \${l.path} <span class="log-model">\${l.model||''}</span> \\u2192 <span class="log-acct">\${l.accountName||'?'}(\${l.accountQuota>=0?l.accountQuota+'%':'?'})</span> route=\${l.route||'?'} \${l.duration?l.duration+'ms':''} <span class="\${ok?'log-ok':'log-err'}">\${ok?'\\u2713':'ERROR'}</span>\${l.error?' '+l.error:''}</div>\`;
+    return \`<div class="log-entry"><span class="log-time">\${t}</span> \${l.method} \${l.path} <span class="log-model">\${l.model||''}</span> \\u2192 <span class="log-acct">\${l.accountName||'?'}</span> route=\${l.route||'?'} \${l.duration?l.duration+'ms':''} <span class="\${ok?'log-ok':'log-err'}">\${ok?'\\u2713':'ERROR'}</span>\${l.error?' '+l.error:''}</div>\`;
   }).join('');
   panel.scrollTop = panel.scrollHeight;
 }
@@ -227,22 +186,14 @@ async function poll() {
   } catch(e) {}
 }
 
-$('#tokenMode').addEventListener('change', e => {
-  const tok = e.target.checked;
-  document.querySelectorAll('.cred-field').forEach(el => el.style.display = tok ? 'none' : '');
-  document.querySelectorAll('.token-field').forEach(el => el.style.display = tok ? '' : 'none');
-});
-
 $('#addForm').addEventListener('submit', async e => {
   e.preventDefault();
-  const tok = $('#tokenMode').checked;
-  const body = { name: $('#fName').value, projectId: $('#fProject').value };
-  if (tok) { body.token = $('#fToken').value; } else { body.email = $('#fEmail').value; }
+  const body = { name: $('#fName').value, token: $('#fToken').value, projectId: $('#fProject').value };
   try {
     const r = await fetch('/api/accounts/add', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
     const d = await r.json();
     if (!r.ok) alert(d.error || 'Failed');
-    else { $('#fName').value=''; $('#fEmail').value=''; $('#fToken').value=''; $('#fProject').value=''; poll(); }
+    else { $('#fName').value=''; $('#fToken').value=''; $('#fProject').value=''; poll(); }
   } catch(e) { alert('Network error'); }
 });
 
@@ -251,30 +202,6 @@ $('#configToggle').addEventListener('click', () => {
   $('#configBody').classList.toggle('open');
 });
 
-async function verifyOtp(name) {
-  const input = document.getElementById('otp_'+name);
-  if (!input || !input.value.trim()) { alert('Please enter the verification code'); return; }
-  try {
-    const r = await fetch('/api/accounts/'+encodeURIComponent(name)+'/verify-otp', {
-      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({code:input.value.trim()})
-    });
-    const d = await r.json();
-    if (!r.ok) alert(d.error || 'Verification failed');
-    poll();
-  } catch(e) { alert('Network error'); }
-}
-
-async function resendOtp(name) {
-  try {
-    const r = await fetch('/api/accounts/'+encodeURIComponent(name)+'/resend-otp', {method:'POST'});
-    const d = await r.json();
-    if (!r.ok) alert(d.error || 'Resend failed');
-    else alert('Verification code resent, check your email');
-    poll();
-  } catch(e) { alert('Network error'); }
-}
-
-async function relogin(n) { await fetch('/api/accounts/'+encodeURIComponent(n)+'/relogin',{method:'POST'}); poll(); }
 async function disable(n) { await fetch('/api/accounts/'+encodeURIComponent(n)+'/disable',{method:'POST'}); poll(); }
 async function enable(n) { await fetch('/api/accounts/'+encodeURIComponent(n)+'/enable',{method:'POST'}); poll(); }
 async function remove(n) { if(!confirm('Remove '+n+'?')) return; await fetch('/api/accounts/'+encodeURIComponent(n)+'/remove',{method:'POST'}); poll(); }

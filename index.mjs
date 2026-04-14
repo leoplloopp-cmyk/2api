@@ -1,10 +1,10 @@
 import { createServer } from 'node:http';
 import { PORT, PROXY_API_KEY, STREAM_MODE, DEFAULT_MODEL, POLL_TIMEOUT, SUPPORTED_MODELS, getModelOwner } from './config.mjs';
+import { CAPY_API_BASE } from './config.mjs';
 import { AccountManager } from './account-manager.mjs';
 import { CapyClient } from './capy-client.mjs';
 import { StreamClient } from './stream-client.mjs';
-import { ThreadPool } from './thread-pool.mjs';
-import { buildPrompt, buildSinglePrompt, toOpenAIChatResponse, toOpenAIStreamChunk, toOpenAIStreamStart, mapModel } from './translator.mjs';
+import { buildPrompt, buildSinglePrompt, toOpenAIChatResponse, toOpenAIStreamChunk, toOpenAIStreamStart, mapModel, fromAnthropicMessages, toAnthropicResponse, toAnthropicStreamEvent } from './translator.mjs';
 import { cleanResponse } from './cleaner.mjs';
 import { createFakeStream, startHeartbeat } from './fake-stream.mjs';
 import { generateDashboard } from './dashboard.mjs';
@@ -12,7 +12,6 @@ import { generateDashboard } from './dashboard.mjs';
 const startTime = Date.now();
 const capy = new CapyClient();
 const streamer = new StreamClient();
-const threadPool = new ThreadPool();
 let manager;
 
 const requestLog = [];
@@ -47,7 +46,7 @@ function cors(res) {
   res.writeHead(204, {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type,Authorization',
+    'Access-Control-Allow-Headers': 'Content-Type,Authorization,x-api-key,anthropic-version',
     'Access-Control-Max-Age': '86400'
   });
   res.end();
@@ -56,7 +55,9 @@ function cors(res) {
 function checkApiAuth(req) {
   const auth = req.headers['authorization'] || '';
   const key = auth.replace(/^Bearer\s+/i, '').trim();
-  return key === PROXY_API_KEY;
+  if (key === PROXY_API_KEY) return true;
+  const xKey = (req.headers['x-api-key'] || '').trim();
+  return xKey === PROXY_API_KEY;
 }
 
 function extractPathParam(url, prefix) {
@@ -194,6 +195,146 @@ async function handleChatCompletions(req, res) {
   }
 }
 
+async function handleAnthropicMessages(req, res) {
+  const start = Date.now();
+  const body = await readBody(req);
+  const stream = body.stream === true;
+  const requestedModel = mapModel(body.model || DEFAULT_MODEL);
+  const messages = fromAnthropicMessages(body);
+
+  let account = manager.getBestAccount();
+  if (!account) {
+    addLog({ timestamp: new Date().toISOString(), method: 'POST', path: '/v1/messages', model: requestedModel, accountName: null, accountQuota: -1, route: null, duration: Date.now() - start, success: false, error: 'no_available_account' });
+    return json(res, 503, { type: 'error', error: { type: 'overloaded_error', message: 'No available accounts' } });
+  }
+
+  const excludeNames = [];
+  const maxRetries = 2;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    if (attempt > 0) {
+      account = manager.getNextAccount(excludeNames);
+      if (!account) break;
+    }
+    excludeNames.push(account.name);
+
+    try {
+      await manager.ensureSession(account);
+      const token = manager.getAuthToken(account);
+      if (!token) throw new Error('no_token');
+
+      const prompt = buildPrompt(messages, requestedModel);
+      const threadData = await capy.createThread(token, account.projectId, prompt, requestedModel);
+      const threadId = threadData.id;
+      const jamId = threadData.jamId || threadData.id;
+
+      let routeUsed = 'A';
+      let content = '';
+
+      if (stream) {
+        const sseMode = STREAM_MODE === 'poll' ? 'poll' : 'auto';
+        let sseSuccess = false;
+
+        if (sseMode !== 'poll') {
+          try {
+            routeUsed = 'B';
+            res.writeHead(200, {
+              'Content-Type': 'text/event-stream',
+              'Cache-Control': 'no-cache',
+              'Connection': 'keep-alive',
+              'Access-Control-Allow-Origin': '*'
+            });
+
+            const id = `msg_${Date.now().toString(36)}`;
+            res.write(`event: message_start\ndata: ${JSON.stringify(toAnthropicStreamEvent('message_start', null, requestedModel, id))}\n\n`);
+            res.write(`event: content_block_start\ndata: ${JSON.stringify(toAnthropicStreamEvent('content_block_start'))}\n\n`);
+            res.write(`event: ping\ndata: {}\n\n`);
+
+            let fullText = '';
+            await streamer.streamResponse(token, jamId,
+              (chunk) => {
+                fullText += chunk;
+                res.write(`event: content_block_delta\ndata: ${JSON.stringify(toAnthropicStreamEvent('content_block_delta', chunk))}\n\n`);
+              },
+              (text) => {
+                const cleaned = cleanResponse(text);
+                res.write(`event: content_block_stop\ndata: ${JSON.stringify(toAnthropicStreamEvent('content_block_stop'))}\n\n`);
+                res.write(`event: message_delta\ndata: ${JSON.stringify(toAnthropicStreamEvent('message_delta', cleaned.length))}\n\n`);
+                res.write(`event: message_stop\ndata: ${JSON.stringify(toAnthropicStreamEvent('message_stop'))}\n\n`);
+                res.end();
+              },
+              (err) => { throw err; }
+            );
+
+            sseSuccess = true;
+            content = cleanResponse(fullText);
+          } catch (e) {
+            if (!res.headersSent) {
+              routeUsed = 'A';
+            } else {
+              manager.markError(account, 'stream_error');
+              addLog({ timestamp: new Date().toISOString(), method: 'POST', path: '/v1/messages', model: requestedModel, accountName: account.name, accountQuota: -1, route: routeUsed, duration: Date.now() - start, success: false, error: e.message });
+              if (!res.writableEnded) res.end();
+              return;
+            }
+          }
+        }
+
+        if (!sseSuccess) {
+          routeUsed = 'A';
+          const rawContent = await capy.pollForResponse(token, threadId, POLL_TIMEOUT);
+          content = cleanResponse(rawContent);
+
+          if (!res.headersSent) {
+            const id = `msg_${Date.now().toString(36)}`;
+            res.writeHead(200, {
+              'Content-Type': 'text/event-stream',
+              'Cache-Control': 'no-cache',
+              'Connection': 'keep-alive',
+              'Access-Control-Allow-Origin': '*'
+            });
+            res.write(`event: message_start\ndata: ${JSON.stringify(toAnthropicStreamEvent('message_start', null, requestedModel, id))}\n\n`);
+            res.write(`event: content_block_start\ndata: ${JSON.stringify(toAnthropicStreamEvent('content_block_start'))}\n\n`);
+            const chunkSize = 20;
+            for (let i = 0; i < content.length; i += chunkSize) {
+              const chunk = content.slice(i, i + chunkSize);
+              res.write(`event: content_block_delta\ndata: ${JSON.stringify(toAnthropicStreamEvent('content_block_delta', chunk))}\n\n`);
+            }
+            res.write(`event: content_block_stop\ndata: ${JSON.stringify(toAnthropicStreamEvent('content_block_stop'))}\n\n`);
+            res.write(`event: message_delta\ndata: ${JSON.stringify(toAnthropicStreamEvent('message_delta', content.length))}\n\n`);
+            res.write(`event: message_stop\ndata: ${JSON.stringify(toAnthropicStreamEvent('message_stop'))}\n\n`);
+            res.end();
+          }
+        }
+      } else {
+        routeUsed = 'A';
+        const rawContent = await capy.pollForResponse(token, threadId, POLL_TIMEOUT);
+        content = cleanResponse(rawContent);
+        json(res, 200, toAnthropicResponse(content, requestedModel));
+      }
+
+      manager.markSuccess(account);
+      addLog({ timestamp: new Date().toISOString(), method: 'POST', path: '/v1/messages', model: requestedModel, accountName: account.name, accountQuota: -1, route: routeUsed, duration: Date.now() - start, success: true, error: null });
+      return;
+
+    } catch (e) {
+      manager.markError(account, e.message);
+      console.error(`[gateway] Account ${account.name} failed: ${e.message}`);
+
+      if (attempt === maxRetries) {
+        addLog({ timestamp: new Date().toISOString(), method: 'POST', path: '/v1/messages', model: requestedModel, accountName: account.name, accountQuota: -1, route: 'A', duration: Date.now() - start, success: false, error: e.message });
+        if (!res.headersSent) {
+          json(res, 502, { type: 'error', error: { type: 'api_error', message: `All accounts failed: ${e.message}` } });
+        }
+      }
+    }
+  }
+
+  if (!res.headersSent) {
+    json(res, 503, { type: 'error', error: { type: 'overloaded_error', message: 'No available accounts for retry' } });
+  }
+}
+
 function handleModels(req, res) {
   const models = SUPPORTED_MODELS.map(id => ({
     id,
@@ -256,20 +397,7 @@ async function handleApiRoute(req, res, url) {
         await manager.enableAccount(name);
         return json(res, 200, { ok: true });
       }
-      if (action === 'relogin') {
-        await manager.reloginAccount(name);
-        return json(res, 200, { ok: true });
-      }
-      if (action === 'verify-otp') {
-        const body = await readBody(req);
-        if (!body.code) return json(res, 400, { error: 'Missing code' });
-        await manager.verifyOtp(name, body.code);
-        return json(res, 200, { ok: true });
-      }
-      if (action === 'resend-otp') {
-        await manager.resendOtp(name);
-        return json(res, 200, { ok: true });
-      }
+
       return json(res, 404, { error: 'Unknown action' });
     } catch (e) {
       return json(res, 400, { error: e.message });
@@ -317,6 +445,10 @@ const server = createServer(async (req, res) => {
 
       if (url === '/v1/chat/completions' && req.method === 'POST') {
         return await handleChatCompletions(req, res);
+      }
+
+      if (url === '/v1/messages' && req.method === 'POST') {
+        return await handleAnthropicMessages(req, res);
       }
 
       return json(res, 404, { error: { message: 'Not found', type: 'invalid_request_error' } });

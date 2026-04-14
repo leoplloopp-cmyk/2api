@@ -5,8 +5,6 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export const CAPY_API_BASE = process.env.CAPY_API_BASE || 'https://capy.ai';
-export const CLERK_DOMAIN = process.env.CLERK_DOMAIN || 'https://clerk.capy.ai';
-export const CLERK_PK = process.env.CLERK_PK || 'pk_live_Y2xlcmsuY2FweS5haSQ';
 export const PORT = parseInt(process.env.PORT || '3000', 10);
 export const PROXY_API_KEY = process.env.PROXY_API_KEY || generateProxyKey();
 export const STREAM_MODE = process.env.STREAM_MODE || 'auto';
@@ -35,16 +33,7 @@ export function loadAccounts() {
 
   const accounts = [];
 
-  if (process.env.CAPY_EMAIL && process.env.CAPY_PASSWORD && process.env.CAPY_PROJECT_ID) {
-    accounts.push({
-      name: 'default',
-      email: process.env.CAPY_EMAIL,
-      password: process.env.CAPY_PASSWORD,
-      projectId: process.env.CAPY_PROJECT_ID,
-      enabled: true,
-      weight: 1
-    });
-  } else if (process.env.CAPY_API_TOKEN && process.env.CAPY_PROJECT_ID) {
+  if (process.env.CAPY_API_TOKEN && process.env.CAPY_PROJECT_ID) {
     accounts.push({
       name: 'default',
       token: process.env.CAPY_API_TOKEN,
@@ -61,19 +50,11 @@ export function loadAccounts() {
 export function saveAccounts(accounts) {
   const data = { accounts: accounts.map(a => {
     const obj = { name: a.name, enabled: a.enabled !== false, weight: a.weight || 1 };
-    if (a.email) { obj.email = a.email; }
     if (a.token) obj.token = a.token;
     if (a.projectId) obj.projectId = a.projectId;
     return obj;
   })};
   writeFileSync(ACCOUNTS_FILE, JSON.stringify(data, null, 2) + '\n', 'utf-8');
-}
-
-export function maskEmail(email) {
-  if (!email) return '***';
-  const [local, domain] = email.split('@');
-  if (!domain) return '***';
-  return local[0] + '***@' + domain;
 }
 
 export const SUPPORTED_MODELS = [
