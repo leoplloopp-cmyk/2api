@@ -33,7 +33,6 @@ export class AccountManager {
     const account = {
       name: cfg.name,
       email: cfg.email || null,
-      password: cfg.password || null,
       token: cfg.token || null,
       projectId: cfg.projectId || null,
       enabled: cfg.enabled !== false,
@@ -42,6 +41,7 @@ export class AccountManager {
       status: 'initializing',
       session: null,
       quota: null,
+      pendingOtp: null,
       health: {
         requestCount: 0,
         errorCount: 0,
@@ -75,39 +75,116 @@ export class AccountManager {
       return;
     }
 
+    if (!account.email) {
+      account.status = 'auth_failed';
+      console.log(`  ✗ ${account.name} — no email configured`);
+      return;
+    }
+
     account.status = 'logging_in';
     try {
-      account.session = await this.clerk.signIn(account.email, account.password);
-      account.status = 'active';
+      const result = await this.clerk.startSignIn(account.email);
 
-      try {
-        account.quota = await this.quotaTracker.fetchQuota(account);
-      } catch (e) {
-        account.quota = { creditsUsed: 0, creditsTotal: 0, creditsRemaining: 0, percentage: -1, plan: 'Unknown', lastSynced: new Date().toISOString() };
+      if (result.existing) {
+        account.session = result.session;
+        account.status = 'active';
+        account.pendingOtp = null;
+        await this._fetchQuotaSafe(account);
+        console.log(`  ✓ ${account.name} (${maskEmail(account.email)}) — existing session`);
+        return;
       }
 
-      const planStr = account.quota?.plan || 'Unknown';
-      const pctStr = account.quota?.percentage >= 0 ? `${account.quota.percentage}% credits` : 'no quota info';
-      console.log(`  ✓ ${account.name} (${maskEmail(account.email)}) — ${planStr}, ${pctStr}`);
+      account.pendingOtp = {
+        signInId: result.signInId,
+        emailAddressId: result.emailAddressId,
+        clientJwt: result.clientJwt,
+        sentAt: Date.now()
+      };
+      account.status = 'awaiting_otp';
+      console.log(`  ⏳ ${account.name} (${maskEmail(account.email)}) — verification code sent, check email`);
     } catch (e) {
       account.status = 'auth_failed';
-      const reason = e.message === 'needs_second_factor'
-        ? 'requires 2FA, use token-only mode'
-        : e.message === 'invalid_credentials'
-          ? 'invalid credentials'
-          : e.message;
-      console.log(`  ✗ ${account.name} — login failed: ${reason}`);
+      console.log(`  ✗ ${account.name} — login failed: ${e.message}`);
     }
   }
 
-  async addAccount({ name, email, password, token, projectId }) {
+  async verifyOtp(name, code) {
+    const account = this.accounts.find(a => a.name === name);
+    if (!account) throw new Error(`Account '${name}' not found`);
+    if (!account.pendingOtp) throw new Error('No pending OTP for this account');
+
+    try {
+      account.session = await this.clerk.verifyOtp(account.pendingOtp.signInId, code, account.pendingOtp.clientJwt);
+      account.status = 'active';
+      account.pendingOtp = null;
+
+      await this._fetchQuotaSafe(account);
+
+      const planStr = account.quota?.plan || 'Unknown';
+      const pctStr = account.quota?.percentage >= 0 ? `${account.quota.percentage}% credits` : 'no quota info';
+      console.log(`  ✓ ${account.name} (${maskEmail(account.email)}) — verified, ${planStr}, ${pctStr}`);
+      this.router = new SmartRouter(this.accounts);
+      return account;
+    } catch (e) {
+      if (e.message === 'code_expired') {
+        account.pendingOtp = null;
+        account.status = 'auth_failed';
+      }
+      throw e;
+    }
+  }
+
+  async resendOtp(name) {
+    const account = this.accounts.find(a => a.name === name);
+    if (!account) throw new Error(`Account '${name}' not found`);
+
+    if (account.pendingOtp?.signInId) {
+      try {
+        const newJwt = await this.clerk.resendCode(account.pendingOtp.signInId, account.pendingOtp.emailAddressId, account.pendingOtp.clientJwt);
+        account.pendingOtp.clientJwt = newJwt;
+        account.pendingOtp.sentAt = Date.now();
+        account.status = 'awaiting_otp';
+        return;
+      } catch (e) {
+        // fall through to start fresh
+      }
+    }
+
+    if (!account.email) throw new Error('No email configured');
+    const result = await this.clerk.startSignIn(account.email);
+
+    if (result.existing) {
+      account.session = result.session;
+      account.status = 'active';
+      account.pendingOtp = null;
+      await this._fetchQuotaSafe(account);
+      return;
+    }
+
+    account.pendingOtp = {
+      signInId: result.signInId,
+      emailAddressId: result.emailAddressId,
+      clientJwt: result.clientJwt,
+      sentAt: Date.now()
+    };
+    account.status = 'awaiting_otp';
+  }
+
+  async _fetchQuotaSafe(account) {
+    try {
+      account.quota = await this.quotaTracker.fetchQuota(account);
+    } catch (e) {
+      account.quota = { creditsUsed: 0, creditsTotal: 0, creditsRemaining: 0, percentage: -1, plan: 'Unknown', lastSynced: new Date().toISOString() };
+    }
+  }
+
+  async addAccount({ name, email, token, projectId }) {
     const existing = this.accounts.find(a => a.name === name);
     if (existing) throw new Error(`Account '${name}' already exists`);
 
     const cfg = {
       name,
       email: email || null,
-      password: password || null,
       token: token || null,
       projectId: projectId || null,
       enabled: true,
@@ -151,6 +228,7 @@ export class AccountManager {
     const account = this.accounts.find(a => a.name === name);
     if (!account) throw new Error(`Account '${name}' not found`);
     account.session = null;
+    account.pendingOtp = null;
     account.status = 'initializing';
     await this._loginAccount(account);
   }
@@ -212,6 +290,8 @@ export class AccountManager {
       isTokenOnly: a.isTokenOnly,
       enabled: a.enabled,
       status: a.status,
+      hasPendingOtp: !!a.pendingOtp,
+      otpSentAt: a.pendingOtp?.sentAt || null,
       plan: a.quota?.plan || 'Unknown',
       creditsUsed: a.quota?.creditsUsed ?? 0,
       creditsTotal: a.quota?.creditsTotal ?? 0,
@@ -240,13 +320,13 @@ export class AccountManager {
     this._refreshTimer = setInterval(async () => {
       for (const account of this.accounts) {
         if (!account.enabled || account.isTokenOnly) continue;
-        if (account.status === 'auth_failed') continue;
+        if (account.status === 'auth_failed' || account.status === 'awaiting_otp') continue;
         try {
           if (!this.clerk.isSessionValid(account)) {
             account.session = await this.clerk.refreshSession(account);
           }
         } catch (e) {
-          // silent
+          account.status = 'auth_failed';
         }
       }
     }, 30000);

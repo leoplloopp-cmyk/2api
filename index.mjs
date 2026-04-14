@@ -228,7 +228,6 @@ async function handleApiRoute(req, res, url) {
       await manager.addAccount({
         name,
         email: body.email,
-        password: body.password,
         token: body.token,
         projectId: body.projectId
       });
@@ -259,6 +258,16 @@ async function handleApiRoute(req, res, url) {
       }
       if (action === 'relogin') {
         await manager.reloginAccount(name);
+        return json(res, 200, { ok: true });
+      }
+      if (action === 'verify-otp') {
+        const body = await readBody(req);
+        if (!body.code) return json(res, 400, { error: 'Missing code' });
+        await manager.verifyOtp(name, body.code);
+        return json(res, 200, { ok: true });
+      }
+      if (action === 'resend-otp') {
+        await manager.resendOtp(name);
         return json(res, 200, { ok: true });
       }
       return json(res, 404, { error: 'Unknown action' });

@@ -6,77 +6,143 @@ export class ClerkAuth {
     this.pk = CLERK_PK;
   }
 
-  async signIn(email, password) {
-    const step1Url = `${this.clerkDomain}/v1/client/sign_ins?_clerk_js_version=5`;
-    const step1Body = new URLSearchParams({ identifier: email });
+  async startSignIn(email) {
+    const url = `${this.clerkDomain}/v1/client/sign_ins?_clerk_js_version=5`;
+    const body = new URLSearchParams({ identifier: email });
 
-    const step1Res = await fetch(step1Url, {
+    const res = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         'Authorization': `Bearer ${this.pk}`
       },
-      body: step1Body
+      body
     });
 
-    const step1Data = await step1Res.json();
+    const clientJwt = res.headers.get('authorization') || '';
+    const data = await res.json();
 
-    if (step1Data.errors) {
-      const err = step1Data.errors[0];
+    if (data.errors) {
+      const err = data.errors[0];
       if (err?.code === 'form_identifier_not_found') {
-        throw new Error('invalid_credentials');
+        throw new Error('account_not_found');
       }
       if (err?.code === 'session_exists') {
-        return this._handleExistingSession(step1Data);
+        return { existing: true, session: this._handleExistingSession(data) };
       }
-      throw new Error(err?.message || err?.code || `Clerk sign_in step1 failed (${step1Res.status})`);
+      throw new Error(err?.message || err?.code || `Clerk sign_in failed (${res.status})`);
     }
 
-    const signInObj = step1Data.response || step1Data;
-    const signInId = signInObj.id;
+    const signIn = data.response || data;
 
-    if (!signInId) {
-      throw new Error('No sign_in ID returned from Clerk');
+    if (signIn.status === 'complete') {
+      return { existing: true, session: this._extractSession(data) };
     }
 
-    const status1 = signInObj.status;
-    if (status1 === 'complete') {
-      return this._extractSession(step1Data);
+    const factors = signIn.supported_first_factors || [];
+    const emailFactor = factors.find(f => f.strategy === 'email_code');
+    if (!emailFactor) {
+      throw new Error('email_code strategy not available');
     }
 
-    const step2Url = `${this.clerkDomain}/v1/client/sign_ins/${signInId}/attempt_first_factor?_clerk_js_version=5`;
-    const step2Body = new URLSearchParams({ strategy: 'password', password });
+    const prepareUrl = `${this.clerkDomain}/v1/client/sign_ins/${signIn.id}/prepare_first_factor?_clerk_js_version=5`;
+    const prepareBody = new URLSearchParams({
+      strategy: 'email_code',
+      email_address_id: emailFactor.email_address_id
+    });
 
-    const step2Res = await fetch(step2Url, {
+    const prepareRes = await fetch(prepareUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
-        'Authorization': `Bearer ${this.pk}`
+        'Authorization': `Bearer ${this.pk}`,
+        'Cookie': `__client=${clientJwt}`
       },
-      body: step2Body
+      body: prepareBody
     });
 
-    const step2Data = await step2Res.json();
+    const prepareClientJwt = prepareRes.headers.get('authorization') || clientJwt;
+    const prepareData = await prepareRes.json();
 
-    if (step2Data.errors) {
-      const err = step2Data.errors[0];
-      if (err?.code === 'form_password_incorrect') {
-        throw new Error('invalid_credentials');
-      }
-      throw new Error(err?.message || err?.code || `Clerk sign_in step2 failed (${step2Res.status})`);
+    if (prepareData.errors) {
+      const err = prepareData.errors[0];
+      throw new Error(err?.message || err?.code || 'Failed to send verification code');
     }
 
-    const signIn = step2Data.response || step2Data;
-    const status = signIn.status;
+    return {
+      existing: false,
+      signInId: signIn.id,
+      emailAddressId: emailFactor.email_address_id,
+      clientJwt: prepareClientJwt
+    };
+  }
 
-    if (status === 'needs_second_factor') {
+  async verifyOtp(signInId, code, clientJwt) {
+    const url = `${this.clerkDomain}/v1/client/sign_ins/${signInId}/attempt_first_factor?_clerk_js_version=5`;
+    const body = new URLSearchParams({ strategy: 'email_code', code });
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Authorization': `Bearer ${this.pk}`,
+        'Cookie': `__client=${clientJwt}`
+      },
+      body
+    });
+
+    const data = await res.json();
+
+    if (data.errors) {
+      const err = data.errors[0];
+      if (err?.code === 'form_code_incorrect') {
+        throw new Error('invalid_code');
+      }
+      if (err?.code === 'verification_expired') {
+        throw new Error('code_expired');
+      }
+      throw new Error(err?.message || err?.code || `OTP verification failed (${res.status})`);
+    }
+
+    const signIn = data.response || data;
+
+    if (signIn.status === 'needs_second_factor') {
       throw new Error('needs_second_factor');
     }
-    if (status === 'needs_new_password') {
-      throw new Error('clerk_status_needs_new_password');
+
+    if (signIn.status !== 'complete') {
+      throw new Error(`Unexpected status: ${signIn.status}`);
     }
 
-    return this._extractSession(step2Data);
+    return this._extractSession(data);
+  }
+
+  async resendCode(signInId, emailAddressId, clientJwt) {
+    const url = `${this.clerkDomain}/v1/client/sign_ins/${signInId}/prepare_first_factor?_clerk_js_version=5`;
+    const body = new URLSearchParams({
+      strategy: 'email_code',
+      email_address_id: emailAddressId
+    });
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Authorization': `Bearer ${this.pk}`,
+        'Cookie': `__client=${clientJwt}`
+      },
+      body
+    });
+
+    const newClientJwt = res.headers.get('authorization') || clientJwt;
+    const data = await res.json();
+
+    if (data.errors) {
+      const err = data.errors[0];
+      throw new Error(err?.message || err?.code || 'Failed to resend code');
+    }
+
+    return newClientJwt;
   }
 
   _extractSession(data) {
@@ -145,7 +211,7 @@ export class ClerkAuth {
 
   async refreshSession(account) {
     if (!account.session?.sessionId) {
-      return this.signIn(account.email, account.password);
+      throw new Error('no_session_to_refresh');
     }
 
     try {
@@ -157,8 +223,7 @@ export class ClerkAuth {
       account.session.expiresAt = Date.now() + 3600000;
       return account.session;
     } catch (e) {
-      console.log(`[clerk] Token refresh failed for ${account.name}, re-logging in...`);
-      return this.signIn(account.email, account.password);
+      throw new Error('session_expired_need_relogin');
     }
   }
 

@@ -61,7 +61,7 @@ export function loadAccounts() {
 export function saveAccounts(accounts) {
   const data = { accounts: accounts.map(a => {
     const obj = { name: a.name, enabled: a.enabled !== false, weight: a.weight || 1 };
-    if (a.email) { obj.email = a.email; obj.password = a.password; }
+    if (a.email) { obj.email = a.email; }
     if (a.token) obj.token = a.token;
     if (a.projectId) obj.projectId = a.projectId;
     return obj;
