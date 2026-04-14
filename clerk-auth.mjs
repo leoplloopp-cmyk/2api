@@ -160,9 +160,7 @@ export class ClerkAuth {
     }
 
     const jwt = session.last_active_token?.jwt || null;
-    const expiresAt = session.expire_at
-      ? new Date(session.expire_at).getTime()
-      : Date.now() + 3600000;
+    const expiresAt = Date.now() + 50000;
 
     return {
       sessionId: session.id,
@@ -182,9 +180,7 @@ export class ClerkAuth {
       sessionId: session.id,
       sessionToken: clientData.id || session.id,
       jwt: session.last_active_token?.jwt || null,
-      expiresAt: session.expire_at
-        ? new Date(session.expire_at).getTime()
-        : Date.now() + 3600000,
+      expiresAt: Date.now() + 50000,
       userId: session.user?.id
     };
   }
