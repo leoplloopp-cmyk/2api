@@ -91,6 +91,7 @@ export class ClerkAuth {
       body
     });
 
+    const newClientJwt = res.headers.get('authorization') || clientJwt;
     const data = await res.json();
 
     if (data.errors) {
@@ -114,7 +115,9 @@ export class ClerkAuth {
       throw new Error(`Unexpected status: ${signIn.status}`);
     }
 
-    return this._extractSession(data);
+    const session = this._extractSession(data);
+    session.clientJwt = newClientJwt;
+    return session;
   }
 
   async resendCode(signInId, emailAddressId, clientJwt) {
@@ -186,7 +189,7 @@ export class ClerkAuth {
     };
   }
 
-  async getSessionToken(clientId, sessionId) {
+  async getSessionToken(clientJwt, sessionId) {
     const url = `${this.clerkDomain}/v1/client/sessions/${sessionId}/tokens?_clerk_js_version=5`;
 
     const res = await fetch(url, {
@@ -194,7 +197,7 @@ export class ClerkAuth {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         'Authorization': `Bearer ${this.pk}`,
-        'Cookie': `__client=${clientId}`
+        'Cookie': `__client=${clientJwt}`
       }
     });
 
@@ -202,11 +205,12 @@ export class ClerkAuth {
       throw new Error(`Token refresh failed (${res.status})`);
     }
 
+    const newClientJwt = res.headers.get('authorization') || clientJwt;
     const data = await res.json();
     const jwt = data.jwt || data.response?.jwt;
     if (!jwt) throw new Error('No JWT in token response');
 
-    return jwt;
+    return { jwt, clientJwt: newClientJwt };
   }
 
   async refreshSession(account) {
@@ -215,12 +219,13 @@ export class ClerkAuth {
     }
 
     try {
-      const jwt = await this.getSessionToken(
-        account.session.sessionToken,
+      const result = await this.getSessionToken(
+        account.session.clientJwt,
         account.session.sessionId
       );
-      account.session.jwt = jwt;
-      account.session.expiresAt = Date.now() + 3600000;
+      account.session.jwt = result.jwt;
+      account.session.clientJwt = result.clientJwt;
+      account.session.expiresAt = Date.now() + 50000;
       return account.session;
     } catch (e) {
       throw new Error('session_expired_need_relogin');
@@ -230,6 +235,6 @@ export class ClerkAuth {
   isSessionValid(account) {
     if (!account.session?.jwt) return false;
     if (!account.session.expiresAt) return false;
-    return account.session.expiresAt > Date.now() + 60000;
+    return account.session.expiresAt > Date.now() + 10000;
   }
 }
