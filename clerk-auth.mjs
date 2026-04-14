@@ -7,44 +7,79 @@ export class ClerkAuth {
   }
 
   async signIn(email, password) {
-    const url = `${this.clerkDomain}/v1/client/sign_ins?_clerk_js_version=5`;
-    const body = new URLSearchParams({ identifier: email, password, strategy: 'password' });
+    const step1Url = `${this.clerkDomain}/v1/client/sign_ins?_clerk_js_version=5`;
+    const step1Body = new URLSearchParams({ identifier: email });
 
-    const res = await fetch(url, {
+    const step1Res = await fetch(step1Url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         'Authorization': `Bearer ${this.pk}`
       },
-      body
+      body: step1Body
     });
 
-    const data = await res.json();
+    const step1Data = await step1Res.json();
 
-    if (!res.ok || data.errors) {
-      const err = data.errors?.[0];
-      if (err?.code === 'form_password_incorrect' || err?.code === 'form_identifier_not_found') {
+    if (step1Data.errors) {
+      const err = step1Data.errors[0];
+      if (err?.code === 'form_identifier_not_found') {
         throw new Error('invalid_credentials');
       }
       if (err?.code === 'session_exists') {
-        return this._handleExistingSession(data);
+        return this._handleExistingSession(step1Data);
       }
-      throw new Error(err?.message || err?.code || `Clerk sign_in failed (${res.status})`);
+      throw new Error(err?.message || err?.code || `Clerk sign_in step1 failed (${step1Res.status})`);
     }
 
-    const signIn = data.response || data;
+    const signInObj = step1Data.response || step1Data;
+    const signInId = signInObj.id;
+
+    if (!signInId) {
+      throw new Error('No sign_in ID returned from Clerk');
+    }
+
+    const status1 = signInObj.status;
+    if (status1 === 'complete') {
+      return this._extractSession(step1Data);
+    }
+
+    const step2Url = `${this.clerkDomain}/v1/client/sign_ins/${signInId}/attempt_first_factor?_clerk_js_version=5`;
+    const step2Body = new URLSearchParams({ strategy: 'password', password });
+
+    const step2Res = await fetch(step2Url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Authorization': `Bearer ${this.pk}`
+      },
+      body: step2Body
+    });
+
+    const step2Data = await step2Res.json();
+
+    if (step2Data.errors) {
+      const err = step2Data.errors[0];
+      if (err?.code === 'form_password_incorrect') {
+        throw new Error('invalid_credentials');
+      }
+      throw new Error(err?.message || err?.code || `Clerk sign_in step2 failed (${step2Res.status})`);
+    }
+
+    const signIn = step2Data.response || step2Data;
     const status = signIn.status;
 
     if (status === 'needs_second_factor') {
       throw new Error('needs_second_factor');
     }
-    if (status === 'needs_first_factor') {
-      throw new Error('needs_first_factor');
-    }
-    if (status === 'needs_identifier' || status === 'needs_new_password') {
-      throw new Error(`clerk_status_${status}`);
+    if (status === 'needs_new_password') {
+      throw new Error('clerk_status_needs_new_password');
     }
 
+    return this._extractSession(step2Data);
+  }
+
+  _extractSession(data) {
     const clientData = data.client || data.response?.client;
     if (!clientData) {
       throw new Error('No client data in Clerk response');
